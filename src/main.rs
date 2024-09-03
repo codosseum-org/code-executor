@@ -1,24 +1,59 @@
+use rocket::State;
 use sandkasten_client::{
-    schemas::programs::{BuildRequest, BuildRunRequest, MainFile},
+    schemas::programs::{BuildRequest, BuildRunRequest, MainFile, RunRequest},
     SandkastenClient,
 };
 
-#[tokio::main]
-async fn main() {
-    let client = SandkastenClient::new("https://sandkasten.bootstrap.academy/".parse().unwrap());
-    let result = client
-        .build_and_run(&BuildRunRequest {
-            build: BuildRequest {
-                environment: "python".into(),
-                main_file: MainFile {
-                    name: Some("test.py".into()),
-                    content: "print(6 * 7, end='')".into(),
-                },
+use std::time;
+#[macro_use]
+extern crate rocket;
+
+struct ClientState {
+    client: SandkastenClient,
+}
+
+#[post("/submit_code?<language>", data = "<input>")]
+async fn submit_code(state: &State<ClientState>, language: &str, input: &str) -> String {
+    let x = state
+        .client
+        .build(&BuildRequest {
+            environment: language.into(),
+            main_file: MainFile {
+                name: None,
+                content: input.into(),
+            },
+            ..Default::default()
+        })
+        .await;
+
+    match x {
+        Ok(x) => return x.program_id.to_string(),
+        Err(x) => return format!("{:?}", x),
+    }
+}
+
+#[get("/code_result?<id>")]
+async fn code_result(state: &State<ClientState>, id: &str) -> String {
+    let x = state
+        .client
+        .run(
+            id,
+            &RunRequest {
                 ..Default::default()
             },
-            run: Default::default(),
+        )
+        .await;
+    match x {
+        Ok(x) => return x.stdout,
+        Err(x) => return format!("{:?}", x),
+    }
+}
+
+#[launch]
+fn rocket() -> _ {
+    rocket::build()
+        .mount("/", routes![submit_code, code_result])
+        .manage(ClientState {
+            client: SandkastenClient::new("https://sandkasten.bootstrap.academy/".parse().unwrap()),
         })
-        .await
-        .unwrap();
-    assert_eq!(result.run.stdout, "42");
 }
